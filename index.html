@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#3B3FD9">
+<title>Interprète</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+/* Mise en page: une colonne type messagerie. En haut les réglages de langue, au centre la conversation (chaque bulle = traduction en gros, original en petit), en bas le micro. Moi = indigo, interlocuteur = vert d'eau. */
+:root{
+  --bg:#EDF0F3; --surface:#FFFFFF; --ink:#13202C; --muted:#5B6B7A; --line:#D5DCE3;
+  --me:#3B3FD9; --me-soft:#E4E5FB; --on-me:#FFFFFF;
+  --them:#0B7A6B; --them-soft:#D8F0EB; --on-them:#FFFFFF;
+  --ok:#0B7A6B; --warn:#A8480A; --danger:#B42318;
+  --font:"Avenir Next","Segoe UI",system-ui,-apple-system,"PingFang SC","Noto Sans SC","Noto Sans JP","Noto Sans Arabic",sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0F151B; --surface:#18212A; --ink:#E7EDF2; --muted:#93A3B2; --line:#2A3641;
+    --me:#8C90FF; --me-soft:#222552; --on-me:#0F151B;
+    --them:#4FD1B8; --them-soft:#12332E; --on-them:#0F151B;
+    --ok:#4FD1B8; --warn:#F59E0B; --danger:#F97066;
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:16px;line-height:1.4;-webkit-tap-highlight-color:transparent}
+button,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--me);outline-offset:2px}
+.app{height:100%;max-width:680px;margin:0 auto;display:grid;grid-template-rows:auto auto auto minmax(0,1fr) auto auto;
+  padding:max(8px,env(safe-area-inset-top,0px)) max(14px,env(safe-area-inset-right,0px)) max(10px,env(safe-area-inset-bottom,0px)) max(14px,env(safe-area-inset-left,0px));gap:10px}
+header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.brand{display:flex;align-items:center;gap:10px}
+.mark{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--me) 50%,var(--them) 50%)}
+h1{font-size:1.15rem;margin:0;letter-spacing:.01em}
+.hbtns{display:flex;gap:6px}
+.ghost{background:transparent;border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:.9rem}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;font-size:.78rem;color:var(--muted);min-width:0}
+.chip i{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+.chip.ok i{background:var(--ok)} .chip.warn i{background:var(--warn)} .chip.live i{background:var(--danger)}
+button.chip{cursor:pointer}
+.langbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:end;gap:8px}
+.pick{display:flex;flex-direction:column;gap:3px;min-width:0}
+.pick span{font-size:.7rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+.pick select{width:100%;min-width:0;border:2px solid var(--line);background:var(--surface);border-radius:12px;padding:10px 8px;font-size:1rem;font-weight:600}
+.pick.me select{border-color:var(--me)} .pick.them select{border-color:var(--them)}
+#swap{border:1px solid var(--line);background:var(--surface);border-radius:12px;width:44px;height:44px;font-size:1.2rem}
+.stage{display:flex;flex-direction:column;gap:10px;min-height:0}
+#log{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:4px 2px;min-height:0}
+.bubble{max-width:88%;border-radius:18px;padding:10px 14px;display:flex;flex-direction:column;gap:3px;overflow-wrap:anywhere}
+.bubble.me{align-self:flex-end;background:var(--me-soft);border-bottom-right-radius:5px}
+.bubble.them{align-self:flex-start;background:var(--them-soft);border-bottom-left-radius:5px}
+.tag{font-size:.7rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+.me .tag{color:var(--me)} .them .tag{color:var(--them)}
+.tr{font-size:1.25rem;font-weight:600;line-height:1.3}
+.tr.pending{opacity:.5}
+.tr.err{color:var(--danger);font-size:.95rem;font-weight:500}
+.src{font-size:.88rem;color:var(--muted)}
+#empty{margin:auto;max-width:430px;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:18px;display:flex;flex-direction:column;gap:10px}
+#empty h2{margin:0;font-size:1.05rem}
+#empty ol{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:6px;color:var(--muted);font-size:.92rem}
+#empty .note{font-size:.82rem;color:var(--muted);border-top:1px solid var(--line);padding-top:10px}
+.btn{border:0;border-radius:12px;padding:10px 16px;font-weight:600;background:var(--me);color:var(--on-me)}
+.btn.alt{background:transparent;border:1px solid var(--line);color:var(--ink)}
+.btn[disabled]{opacity:.5;cursor:default}
+#interim{min-height:1.4em;text-align:center;color:var(--muted);font-size:.95rem;font-style:italic;overflow-wrap:anywhere}
+footer{display:flex;flex-direction:column;align-items:center;gap:10px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;background:var(--surface);padding:3px}
+.seg button{border:0;background:transparent;border-radius:999px;padding:6px 16px;font-size:.88rem;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg);font-weight:600}
+.auto{display:flex;align-items:center;gap:16px;width:100%;justify-content:center}
+#mic{width:84px;height:84px;border-radius:50%;border:0;background:var(--me);color:var(--on-me);font-weight:700;font-size:.9rem;flex:none;position:relative}
+#mic.on{background:var(--danger);color:#fff;animation:pulse 1.6s ease-out infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(180,35,24,.45)}100%{box-shadow:0 0 0 22px rgba(180,35,24,0)}}
+@media (prefers-reduced-motion:reduce){#mic.on{animation:none}}
+#listenSide{border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:8px 12px;font-size:.85rem;text-align:left;min-width:0}
+#listenSide b{display:block;font-size:.95rem}
+.manual{display:none;gap:10px;width:100%}
+.manual button{flex:1;min-width:0;border:0;border-radius:16px;padding:16px 8px;font-weight:700;font-size:.95rem;display:flex;flex-direction:column;gap:2px;align-items:center}
+.manual small{font-weight:500;opacity:.9}
+#pbMe{background:var(--me);color:var(--on-me)} #pbThem{background:var(--them);color:var(--on-them)}
+.manual button.on{outline:4px solid var(--danger);outline-offset:2px}
+body[data-mode="manual"] .auto{display:none}
+body[data-mode="manual"] .manual{display:flex}
+#face{transform:rotate(180deg);background:var(--them-soft);border-radius:18px;padding:12px 16px;display:flex;flex-direction:column;gap:4px;max-height:30vh;overflow-y:auto;flex:none}
+#face .tag{color:var(--them)}
+#faceText{font-size:1.6rem;font-weight:700;line-height:1.25;overflow-wrap:anywhere}
+#faceText.hint{font-size:1rem;font-weight:500;color:var(--muted)}
+dialog{border:0;border-radius:20px;background:var(--surface);color:var(--ink);padding:0;width:min(560px,calc(100% - 24px));max-height:86dvh;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+dialog::backdrop{background:rgba(5,10,15,.55)}
+.sheet{display:flex;flex-direction:column;max-height:86dvh}
+.sheet header{padding:16px 18px;border-bottom:1px solid var(--line)}
+.sheet h2{margin:0;font-size:1.1rem}
+.sheet .body{overflow-y:auto;padding:6px 18px 16px;display:flex;flex-direction:column}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.row .t{min-width:0} .row .t b{display:block} .row .t span{font-size:.82rem;color:var(--muted)}
+.row .btn{padding:8px 14px;font-size:.88rem;flex:none}
+.pill{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--ok);font-weight:700}
+.banner{background:var(--me-soft);border-radius:12px;padding:10px 12px;font-size:.86rem;margin:10px 0 4px}
+.setrow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.setrow label{display:flex;flex-direction:column;min-width:0} .setrow small{color:var(--muted)}
+.setrow select{max-width:55%;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:8px}
+.setrow input[type=range]{width:45%}
+.sheet footer{padding:12px 18px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+#toast{position:fixed;left:50%;bottom:calc(120px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-size:.9rem;max-width:min(90%,420px);text-align:center;opacity:0;pointer-events:none;transition:opacity .2s;z-index:50}
+#toast.show{opacity:1}
+</style>
+</head>
+<body data-mode="auto">
+<div class="app">
+  <header>
+    <div class="brand"><span class="mark" aria-hidden="true"></span><h1>Interprète</h1></div>
+    <div class="hbtns">
+      <button class="ghost" id="btnLangs">Langues</button>
+      <button class="ghost" id="btnSet">Réglages</button>
+    </div>
+  </header>
+
+  <div class="chips">
+    <button class="chip" id="chEngine" type="button"><i></i><span>Moteur…</span></button>
+    <button class="chip" id="chOut" type="button" title="Basculer entre écouteurs et haut-parleur du téléphone"><i></i><span>Sortie audio…</span></button>
+    <span class="chip" id="chMic"><i></i><span>Micro arrêté</span></span>
+  </div>
+
+  <section class="langbar" aria-label="Langues">
+    <label class="pick me"><span>Moi</span><select id="selMe"></select></label>
+    <button id="swap" type="button" aria-label="Inverser les langues">⇄</button>
+    <label class="pick them"><span>Interlocuteur</span><select id="selThem"></select></label>
+  </section>
+
+  <div class="stage">
+  <section id="face" hidden aria-label="Affichage pour l’interlocuteur">
+    <div class="tag" id="faceTag">Pour votre interlocuteur</div>
+    <div id="faceText" class="hint">Sa traduction apparaît ici, retournée pour qu’il la lise en face de vous.</div>
+  </section>
+  <main id="log" aria-live="polite">
+    <div id="empty">
+      <h2>Une conversation, deux écouteurs</h2>
+      <ol>
+        <li>Connectez votre casque ou vos écouteurs, Bluetooth ou filaires.</li>
+        <li>Choisissez votre langue et celle de votre interlocuteur.</li>
+        <li>Touchez le micro et parlez. La traduction est lue dans le casque et affichée ici.</li>
+      </ol>
+      <button class="btn" id="btnPrep" hidden>Préparer le français, l’anglais et le chinois</button>
+      <div class="note">Sans écouteurs, touchez « Sortie » et choisissez le haut-parleur du téléphone : posez l’appareil entre vous, la traduction est lue à voix haute et affichée à l’endroit pour vous, à l’envers pour votre interlocuteur. Avec un casque, la voix sort sur la sortie audio active.</div>
+    </div>
+  </main>
+  </div>
+
+  <div id="interim" aria-live="off"></div>
+
+  <footer>
+    <div class="seg" role="group" aria-label="Mode">
+      <button type="button" id="mAuto" aria-pressed="true">Automatique</button>
+      <button type="button" id="mManual" aria-pressed="false">Manuel</button>
+    </div>
+    <div class="auto">
+      <button id="mic" type="button">Écouter</button>
+      <button id="listenSide" type="button" aria-label="Changer la langue écoutée"><span>Écoute en</span><b id="listenName">Français</b></button>
+    </div>
+    <div class="manual">
+      <button id="pbMe" type="button"><span>Je parle</span><small id="pbMeL">Français</small></button>
+      <button id="pbThem" type="button"><span>Il ou elle parle</span><small id="pbThemL">English</small></button>
+    </div>
+  </footer>
+</div>
+
+<dialog id="dlgLangs">
+  <div class="sheet">
+    <header><h2>Langues</h2></header>
+    <div class="body" id="langList"></div>
+    <footer><button class="btn alt" data-close>Fermer</button></footer>
+  </div>
+</dialog>
+
+<dialog id="dlgSet">
+  <div class="sheet">
+    <header><h2>Réglages</h2></header>
+    <div class="body">
+      <div class="setrow"><label for="oOutput">Sortie de la voix<small>Écouteurs, ou haut-parleur pour parler face à face</small></label>
+        <select id="oOutput"><option value="headset">Écouteurs ou casque</option><option value="phone">Haut-parleur du téléphone</option></select></div>
+      <div class="setrow"><label for="oSpeak">Lire la traduction à voix haute<small>Dans le casque connecté</small></label><input type="checkbox" id="oSpeak"></div>
+      <div class="setrow"><label for="oRate">Vitesse de la voix<small id="oRateV"></small></label><input type="range" id="oRate" min="0.7" max="1.4" step="0.05"></div>
+      <div class="setrow"><label for="oVoiceMe">Voix pour <span id="vlMe"></span></label><select id="oVoiceMe"></select></div>
+      <div class="setrow"><label for="oVoiceThem">Voix pour <span id="vlThem"></span></label><select id="oVoiceThem"></select></div>
+      <div class="setrow"><label for="oOnline">Traduction en ligne de secours<small>Utilisée si le modèle de la langue n’est pas installé</small></label><input type="checkbox" id="oOnline"></div>
+      <div class="setrow"><label>Conversation<small>Efface les bulles affichées</small></label><button class="btn alt" id="btnClear">Effacer</button></div>
+    </div>
+    <footer><button class="btn alt" data-close>Fermer</button></footer>
+  </div>
+</dialog>
+
+<div id="toast" role="status"></div>
+
+<script>
+"use strict";
+/* ---------- Langues ---------- */
+const LANGS=[
+  {c:"fr",n:"Français",r:"fr-FR",base:1},{c:"en",n:"English",r:"en-US",base:1},{c:"zh",n:"中文（普通话）",r:"zh-CN",base:1},
+  {c:"es",n:"Español",r:"es-ES"},{c:"de",n:"Deutsch",r:"de-DE"},{c:"it",n:"Italiano",r:"it-IT"},{c:"pt",n:"Português",r:"pt-PT"},
+  {c:"nl",n:"Nederlands",r:"nl-NL"},{c:"pl",n:"Polski",r:"pl-PL"},{c:"ru",n:"Русский",r:"ru-RU"},{c:"tr",n:"Türkçe",r:"tr-TR"},
+  {c:"ar",n:"العربية",r:"ar-SA"},{c:"hi",n:"हिन्दी",r:"hi-IN"},{c:"ja",n:"日本語",r:"ja-JP"},{c:"ko",n:"한국어",r:"ko-KR"},
+  {c:"vi",n:"Tiếng Việt",r:"vi-VN"},{c:"th",n:"ไทย",r:"th-TH"}
+];
+const BASE=LANGS.filter(l=>l.base).map(l=>l.c);
+const L=c=>LANGS.find(l=>l.c===c)||LANGS[0];
+const $=s=>document.querySelector(s);
+
+/* ---------- Préférences ---------- */
+const store={
+  get(k,d){try{const v=localStorage.getItem("itp."+k);return v==null?d:JSON.parse(v)}catch(e){return d}},
+  set(k,v){try{localStorage.setItem("itp."+k,JSON.stringify(v))}catch(e){}}
+};
+const S={me:store.get("me","fr"),them:store.get("them","en"),mode:store.get("mode","auto"),rate:store.get("rate",1),
+  speak:store.get("speak",true),output:store.get("output","headset"),online:store.get("online",true),voices:store.get("voices",{})};
+const save=()=>{for(const k in S)store.set(k,S[k])};
+const code=side=>side==="me"?S.me:S.them;
+const other=side=>side==="me"?"them":"me";
+
+/* ---------- Capacités du navigateur ---------- */
+const HAS_TR="Translator" in self;
+const HAS_LD="LanguageDetector" in self;
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+const HAS_TTS="speechSynthesis" in window;
+
+/* ---------- Traduction ---------- */
+const translators=new Map();
+async function pairStatus(s,t){
+  if(!HAS_TR)return "unavailable";
+  try{return await Translator.availability({sourceLanguage:s,targetLanguage:t})}catch(e){return "unavailable"}
+}
+function getTranslator(s,t,onProgress){
+  const k=s+">"+t;
+  if(translators.has(k))return translators.get(k);
+  const p=Translator.create({sourceLanguage:s,targetLanguage:t,
+    monitor(m){m.addEventListener("downloadprogress",e=>{if(onProgress)onProgress(e.loaded)})}});
+  translators.set(k,p);
+  p.catch(()=>translators.delete(k));
+  return p;
+}
+async function onlineTranslate(text,s,t){
+  const f=c=>c==="zh"?"zh-CN":c;
+  const r=await fetch("https://api.mymemory.translated.net/get?q="+encodeURIComponent(text)+"&langpair="+encodeURIComponent(f(s)+"|"+f(t)));
+  if(!r.ok)throw new Error("HTTP "+r.status);
+  const j=await r.json();
+  const out=j&&j.responseData&&j.responseData.translatedText;
+  if(!out)throw new Error("Réponse vide");
+  return out;
+}
+async function translate(text,s,t){
+  if(s===t)return {text,engine:"none"};
+  if(HAS_TR){
+    const st=await pairStatus(s,t);
+    if(st==="available"){
+      try{const tr=await getTranslator(s,t);return {text:await tr.translate(text),engine:"device"}}catch(e){}
+    }
+  }
+  if(!S.online)throw new Error("Modèle non installé et traduction en ligne désactivée.");
+  return {text:await onlineTranslate(text,s,t),engine:"online"};
+}
+
+/* ---------- Détection de la langue ---------- */
+let detector=null;
+async function detect(text,cands,hint){
+  if(HAS_LD){
+    try{
+      detector=detector||await LanguageDetector.create();
+      const res=await detector.detect(text);
+      for(const r of res){
+        const c=r.detectedLanguage.split("-")[0];
+        if(cands.includes(c)&&r.confidence>0.3)return c;
+      }
+    }catch(e){}
+  }else if(/[一-鿿]/.test(text)&&cands.includes("zh"))return "zh";
+  return hint;
+}
+
+/* ---------- Voix ---------- */
+let VOICES=[];
+function loadVoices(){if(HAS_TTS)VOICES=speechSynthesis.getVoices()}
+if(HAS_TTS){loadVoices();speechSynthesis.onvoiceschanged=loadVoices}
+const voicesFor=c=>VOICES.filter(v=>v.lang.toLowerCase().replace("_","-").startsWith(c));
+function pickVoice(c){
+  const saved=S.voices[c];
+  const list=voicesFor(c);
+  return list.find(v=>v.name===saved)||list.find(v=>v.lang===L(c).r)||list[0]||null;
+}
+let paused=0,chain=Promise.resolve();
+function say(text,c){chain=chain.then(()=>speakOne(text,c));return chain}
+async function speakOne(text,c){
+  if(!S.speak||!HAS_TTS)return;
+  paused++;abortRec();
+  await new Promise(res=>{
+    const u=new SpeechSynthesisUtterance(text);
+    const v=pickVoice(c);if(v)u.voice=v;
+    u.lang=L(c).r;u.rate=S.rate;
+    u.onend=u.onerror=()=>res();
+    speechSynthesis.speak(u);
+  });
+  if(S.output==="phone")await new Promise(r=>setTimeout(r,450));
+  paused--;
+  if(!paused&&listening)startRec();
+}
+
+/* ---------- Reconnaissance vocale ---------- */
+let rec=null,listening=false,running=false,side="me",gotResult=false;
+function abortRec(){
+  if(!rec)return;
+  const r=rec;rec=null;running=false;
+  r.onresult=r.onerror=r.onend=null;
+  try{r.abort()}catch(e){}
+}
+function startRec(){
+  if(!SR||paused)return;
+  abortRec();
+  const r=new SR();rec=r;gotResult=false;
+  r.lang=L(code(side)).r;r.interimResults=true;r.continuous=false;r.maxAlternatives=1;
+  r.onresult=e=>{
+    let interim="",fin="";
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      const x=e.results[i];
+      if(x.isFinal)fin+=x[0].transcript;else interim+=x[0].transcript;
+    }
+    $("#interim").textContent=interim||fin;
+    if(fin.trim()){
+      const heard=side;
+      gotResult=true;
+      if(S.mode==="auto"){side=other(heard);renderControls()}
+      $("#interim").textContent="";
+      handleFinal(fin.trim(),heard);
+    }
+  };
+  r.onerror=e=>{
+    if(e.error==="not-allowed"||e.error==="service-not-allowed"){
+      listening=false;renderControls();toast("Accès au micro refusé. Autorisez-le dans les réglages du navigateur.");
+    }else if(e.error==="network"){toast("La reconnaissance vocale a besoin d’une connexion réseau.")}
+    else if(e.error==="language-not-supported"){listening=false;renderControls();toast("Langue non prise en charge par la reconnaissance vocale.")}
+  };
+  r.onend=()=>{
+    if(r!==rec)return;
+    running=false;$("#interim").textContent="";
+    if(!listening||paused)return;
+    if(S.mode==="auto"&&!gotResult){side=other(side);renderControls()}
+    setTimeout(()=>{if(listening&&!paused&&!running)startRec()},200);
+  };
+  try{r.start();running=true}catch(e){}
+}
+async function unlockMic(){
+  try{
+    const st=await navigator.mediaDevices.getUserMedia({audio:true});
+    st.getTracks().forEach(t=>t.stop());
+  }catch(e){return false}
+  refreshOutput();
+  return true;
+}
+async function startListening(s){
+  if(!SR){toast("Ce navigateur ne propose pas la reconnaissance vocale. Utilisez Chrome.");return}
+  if(!listening){const ok=await unlockMic();if(!ok){toast("Accès au micro refusé. Autorisez-le dans les réglages du navigateur.");return}}
+  if(s)side=s;
+  listening=true;renderControls();startRec();
+}
+function stopListening(){
+  listening=false;abortRec();$("#interim").textContent="";renderControls();
+}
+
+/* ---------- Flux d'une phrase ---------- */
+async function handleFinal(text,hint){
+  let from=hint;
+  if(S.mode==="auto"&&S.me!==S.them){
+    const c=await detect(text,[S.me,S.them],code(hint));
+    from=c===S.me?"me":c===S.them?"them":hint;
+  }
+  const to=other(from),src=code(from),dst=code(to);
+  const b=addBubble(from,text,src,dst);
+  let res;
+  try{res=await translate(text,src,dst)}
+  catch(e){b.fail("Traduction impossible. "+(e&&e.message?e.message:""));return}
+  b.set(res.text);
+  if(to==="them")showFace(res.text,dst);
+  if(S.mode==="auto"){side=to;renderControls()}
+  await say(res.text,dst);
+}
+
+/* ---------- Interface: conversation ---------- */
+function addBubble(from,orig,src,dst){
+  const empty=$("#empty");if(empty)empty.remove();
+  const el=document.createElement("article");el.className="bubble "+from;
+  const tag=document.createElement("div");tag.className="tag";
+  tag.textContent=(from==="me"?"Moi":"Interlocuteur")+" · "+src.toUpperCase()+" → "+dst.toUpperCase();
+  const tr=document.createElement("div");tr.className="tr pending";tr.lang=dst;tr.textContent="…";
+  const so=document.createElement("div");so.className="src";so.lang=src;so.textContent=orig;
+  el.append(tag,tr,so);
+  const log=$("#log");log.append(el);log.scrollTop=log.scrollHeight;
+  return {
+    set(t){tr.textContent=t;tr.classList.remove("pending");log.scrollTop=log.scrollHeight},
+    fail(t){tr.textContent=t;tr.classList.remove("pending");tr.classList.add("err")}
+  };
+}
+let toastT=0;
+function toast(msg){
+  const t=$("#toast");t.textContent=msg;t.classList.add("show");
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),3800);
+}
+
+/* ---------- Interface: barre de langues et commandes ---------- */
+function fillSelect(sel,val){
+  sel.textContent="";
+  for(const l of LANGS){const o=document.createElement("option");o.value=l.c;o.textContent=l.n;sel.append(o)}
+  sel.value=val;
+}
+function renderLangs(){
+  fillSelect($("#selMe"),S.me);fillSelect($("#selThem"),S.them);
+  $("#pbMeL").textContent=L(S.me).n;$("#pbThemL").textContent=L(S.them).n;
+  renderControls();updateEngine();
+}
+function renderControls(){
+  document.body.dataset.mode=S.mode;
+  $("#mAuto").setAttribute("aria-pressed",S.mode==="auto");
+  $("#mManual").setAttribute("aria-pressed",S.mode==="manual");
+  const mic=$("#mic");mic.classList.toggle("on",listening);mic.textContent=listening?"Arrêter":"Écouter";
+  $("#listenName").textContent=L(code(side)).n;
+  $("#pbMe").classList.toggle("on",listening&&side==="me");
+  $("#pbThem").classList.toggle("on",listening&&side==="them");
+  const chMic=$("#chMic");chMic.className="chip"+(listening?" live":"");
+  chMic.lastChild.textContent=listening?"Micro actif · "+L(code(side)).n:"Micro arrêté";
+}
+async function updateEngine(){
+  const ch=$("#chEngine"),label=ch.lastChild;
+  if(!HAS_TR){ch.className="chip warn";label.textContent="Traduction en ligne";return}
+  const [a,b]=await Promise.all([pairStatus(S.me,S.them),pairStatus(S.them,S.me)]);
+  if(S.me===S.them||(a==="available"&&b==="available")){ch.className="chip ok";label.textContent="Traduction sur l’appareil"}
+  else if(a==="downloading"||b==="downloading"){ch.className="chip warn";label.textContent="Téléchargement en cours"}
+  else{ch.className="chip warn";label.textContent="Modèle à télécharger · en ligne"}
+}
+async function refreshOutput(){
+  const ch=$("#chOut");
+  if(S.output==="phone"){ch.className="chip ok";ch.lastChild.textContent="Sortie : haut-parleur du téléphone";return}
+  try{
+    const d=await navigator.mediaDevices.enumerateDevices();
+    const outs=d.filter(x=>x.kind==="audiooutput");
+    const def=outs.find(x=>x.deviceId==="default")||outs[0];
+    const label=def&&def.label?def.label.replace(/^(Default|Par défaut)\s*-\s*/i,""):"";
+    if(label){
+      const head=/bluetooth|airpods|buds|headset|headphone|casque|écouteur|ecouteur|earphone|jabra|bose|sony|beats|pods/i.test(label);
+      ch.className="chip"+(head?" ok":"");ch.lastChild.textContent="Sortie : "+label;return;
+    }
+  }catch(e){}
+  ch.className="chip";ch.lastChild.textContent="Sortie : appareil actif";
+}
+if(navigator.mediaDevices&&navigator.mediaDevices.addEventListener)navigator.mediaDevices.addEventListener("devicechange",refreshOutput);
+
+/* ---------- Téléchargement des langues ---------- */
+const progress={};
+const dlOpen=()=>$("#dlgLangs").open;
+async function langState(c){
+  if(!HAS_TR)return "na";
+  const others=BASE.filter(b=>b!==c);
+  const sts=[];
+  for(const o of others){sts.push(pairStatus(c,o),pairStatus(o,c))}
+  const r=await Promise.all(sts);
+  if(r.every(x=>x==="available"))return "ok";
+  if(progress[c]!=null||r.includes("downloading"))return "dl";
+  return "todo";
+}
+async function download(c){
+  if(!HAS_TR)return;
+  const others=BASE.filter(b=>b!==c);
+  const pairs=[];
+  for(const o of others){pairs.push([c,o],[o,c])}
+  const prog=pairs.map(()=>0);
+  progress[c]=0;renderLangSheet();
+  const tick=i=>p=>{prog[i]=p;progress[c]=prog.reduce((a,b)=>a+b,0)/prog.length;if(dlOpen())renderLangSheet()};
+  try{
+    await Promise.all(pairs.map(([s,t],i)=>getTranslator(s,t,tick(i))));
+    toast(L(c).n+" est installée.");
+  }catch(e){toast("Téléchargement impossible. Vérifiez la connexion et l’espace disponible.")}
+  delete progress[c];
+  renderLangSheet();updateEngine();
+}
+async function renderLangSheet(){
+  const box=$("#langList");
+  const states=await Promise.all(LANGS.map(l=>langState(l.c)));
+  box.textContent="";
+  if(!HAS_TR){
+    const b=document.createElement("div");b.className="banner";
+    b.textContent="Le moteur de traduction hors connexion n’existe pas dans ce navigateur (Chrome 138 ou plus sur ordinateur). La traduction passe alors par le mode en ligne.";
+    box.append(b);
+  }
+  LANGS.forEach((l,i)=>{
+    const row=document.createElement("div");row.className="row";
+    const t=document.createElement("div");t.className="t";
+    const nm=document.createElement("b");nm.textContent=l.n;
+    const sub=document.createElement("span");
+    const st=states[i];
+    sub.textContent=l.base?"Langue de base":"Optionnelle";
+    t.append(nm,sub);row.append(t);
+    if(st==="ok"){const p=document.createElement("span");p.className="pill";p.textContent="Installée";row.append(p)}
+    else if(st==="na"){const p=document.createElement("span");p.className="pill";p.style.color="var(--muted)";p.textContent="En ligne";row.append(p)}
+    else{
+      const btn=document.createElement("button");btn.className="btn";btn.type="button";
+      if(st==="dl"){btn.disabled=true;btn.textContent=progress[l.c]!=null?"Téléchargement "+Math.round(progress[l.c]*100)+" %":"Téléchargement…"}
+      else{btn.textContent=l.base?"Préparer":"Télécharger";btn.addEventListener("click",()=>download(l.c))}
+      row.append(btn);
+    }
+    box.append(row);
+  });
+}
+
+/* ---------- Réglages ---------- */
+function fillVoice(sel,c){
+  sel.textContent="";
+  const list=voicesFor(c);
+  if(!list.length){const o=document.createElement("option");o.textContent="Voix par défaut";sel.append(o);sel.disabled=true;return}
+  sel.disabled=false;
+  for(const v of list){const o=document.createElement("option");o.value=v.name;o.textContent=v.name;sel.append(o)}
+  const cur=pickVoice(c);if(cur)sel.value=cur.name;
+}
+function openSettings(){
+  $("#oSpeak").checked=S.speak;$("#oOnline").checked=S.online;
+  $("#oRate").value=S.rate;$("#oRateV").textContent="× "+Number(S.rate).toFixed(2);
+  $("#vlMe").textContent=L(S.me).n;$("#vlThem").textContent=L(S.them).n;
+  fillVoice($("#oVoiceMe"),S.me);fillVoice($("#oVoiceThem"),S.them);
+  $("#dlgSet").showModal();
+}
+
+/* ---------- Événements ---------- */
+$("#selMe").addEventListener("change",e=>{S.me=e.target.value;save();renderLangs()});
+$("#selThem").addEventListener("change",e=>{S.them=e.target.value;save();renderLangs()});
+$("#swap").addEventListener("click",()=>{[S.me,S.them]=[S.them,S.me];save();renderLangs()});
+$("#mAuto").addEventListener("click",()=>{if(S.mode!=="auto"){stopListening();S.mode="auto";save();renderControls()}});
+$("#mManual").addEventListener("click",()=>{if(S.mode!=="manual"){stopListening();S.mode="manual";save();renderControls()}});
+$("#mic").addEventListener("click",()=>listening?stopListening():startListening(side));
+$("#listenSide").addEventListener("click",()=>{side=other(side);renderControls();if(listening)startRec()});
+$("#pbMe").addEventListener("click",()=>listening&&side==="me"?stopListening():startListening("me"));
+$("#pbThem").addEventListener("click",()=>listening&&side==="them"?stopListening():startListening("them"));
+$("#btnLangs").addEventListener("click",()=>{$("#dlgLangs").showModal();renderLangSheet()});
+$("#chEngine").addEventListener("click",()=>{$("#dlgLangs").showModal();renderLangSheet()});
+$("#btnPrep").addEventListener("click",()=>{BASE.forEach(c=>download(c));toast("Téléchargement des langues de base lancé.")});
+$("#btnSet").addEventListener("click",openSettings);
+document.querySelectorAll("[data-close]").forEach(b=>b.addEventListener("click",()=>b.closest("dialog").close()));
+document.querySelectorAll("dialog").forEach(d=>d.addEventListener("click",e=>{if(e.target===d)d.close()}));
+$("#dlgLangs").addEventListener("close",updateEngine);
+$("#oSpeak").addEventListener("change",e=>{S.speak=e.target.checked;save()});
+$("#oOnline").addEventListener("change",e=>{S.online=e.target.checked;save()});
+$("#oRate").addEventListener("input",e=>{S.rate=Number(e.target.value);$("#oRateV").textContent="× "+S.rate.toFixed(2);save()});
+$("#oVoiceMe").addEventListener("change",e=>{S.voices[S.me]=e.target.value;save()});
+$("#oVoiceThem").addEventListener("change",e=>{S.voices[S.them]=e.target.value;save()});
+$("#btnClear").addEventListener("click",()=>{
+  const log=$("#log");log.querySelectorAll(".bubble").forEach(b=>b.remove());resetFace();
+  $("#dlgSet").close();
+});
+document.addEventListener("visibilitychange",()=>{if(document.hidden&&listening)stopListening();else updateEngine()});
+
+/* ---------- Sortie: écouteurs ou haut-parleur du téléphone ---------- */
+function showFace(text,dst){
+  $("#faceTag").textContent="Traduction · "+L(dst).n;
+  const t=$("#faceText");t.lang=dst;t.textContent=text;t.classList.remove("hint");
+}
+function resetFace(){
+  const t=$("#faceText");t.removeAttribute("lang");t.classList.add("hint");
+  t.textContent="Sa traduction apparaît ici, retournée pour qu’il la lise en face de vous.";
+  $("#faceTag").textContent="Pour votre interlocuteur";
+}
+function applyOutput(){
+  $("#face").hidden=S.output!=="phone";
+  $("#oOutput").value=S.output;
+}
+function setOutput(v,announce){
+  S.output=v;save();applyOutput();refreshOutput();
+  if(announce)toast(v==="phone"?"Mode téléphone : posez l’appareil entre vous. La traduction est lue à voix haute.":"Mode écouteurs : la voix sort sur le casque connecté.");
+}
+$("#chOut").addEventListener("click",()=>setOutput(S.output==="phone"?"headset":"phone",true));
+$("#oOutput").addEventListener("change",e=>setOutput(e.target.value,true));
+
+/* ---------- Démarrage ---------- */
+if(!HAS_TR)$("#btnPrep").hidden=true;else $("#btnPrep").hidden=false;
+if(!SR)toast("La reconnaissance vocale n’est pas disponible ici. Ouvrez l’appli dans Chrome.");
+applyOutput();renderLangs();refreshOutput();
+if("serviceWorker" in navigator&&location.protocol.startsWith("http"))navigator.serviceWorker.register("sw.js").catch(()=>{});
+</script>
+</body>
+</html>

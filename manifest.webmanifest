@@ -1,0 +1,14 @@
+{
+  "name": "Interprète",
+  "short_name": "Interprète",
+  "description": "Traduction conversationnelle dans vos écouteurs Bluetooth ou filaires.",
+  "lang": "fr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0F151B",
+  "theme_color": "#3B3FD9",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
