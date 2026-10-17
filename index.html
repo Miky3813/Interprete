@@ -109,6 +109,9 @@ dialog::backdrop{background:rgba(5,10,15,.55)}
 .setrow select{max-width:55%;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:8px}
 .setrow input[type=range]{width:45%}
 .sheet footer{padding:12px 18px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+.typed{display:flex;gap:6px;width:100%}
+.typed input{flex:1;min-width:0;border:2px solid var(--line);background:var(--surface);color:var(--ink);border-radius:12px;padding:10px 12px;font-size:16px}
+.typed .btn{padding:8px 10px;font-size:.8rem;flex:none;white-space:nowrap}
 #diag{margin:0;font:inherit;font-size:.8rem;white-space:pre-wrap;color:var(--muted);overflow-wrap:anywhere;width:100%}
 #toast{position:fixed;left:50%;bottom:calc(120px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-size:.9rem;max-width:min(90%,420px);text-align:center;opacity:0;pointer-events:none;transition:opacity .2s;z-index:50}
 #toast.show{opacity:1}
@@ -158,6 +161,11 @@ dialog::backdrop{background:rgba(5,10,15,.55)}
   <div id="interim" aria-live="off"></div>
 
   <footer>
+    <form id="typed" class="typed" autocomplete="off">
+      <input id="tIn" type="text" enterkeyhint="send" placeholder="Écrire ou dicter (micro du clavier)" aria-label="Texte à traduire">
+      <button type="button" class="btn" id="tMe">Moi</button>
+      <button type="button" class="btn alt" id="tThem">Lui</button>
+    </form>
     <div class="seg" role="group" aria-label="Mode">
       <button type="button" id="mAuto" aria-pressed="true">Automatique</button>
       <button type="button" id="mManual" aria-pressed="false">Manuel</button>
@@ -294,25 +302,38 @@ function pickVoice(c){
   const list=voicesFor(c);
   return list.find(v=>v.name===saved)||list.find(v=>v.lang===L(c).r)||list[0]||null;
 }
+const LOG=[];
+function log(m){LOG.push(new Date().toLocaleTimeString("fr-FR")+" "+m);if(LOG.length>14)LOG.shift()}
 let paused=0,chain=Promise.resolve();
-function say(text,c){chain=chain.then(()=>speakOne(text,c));return chain}
+function say(text,c){chain=chain.then(()=>speakOne(text,c)).catch(()=>{});return chain}
+/* Safari sur iPhone ne signale pas toujours la fin de la lecture : un minuteur de sécurité évite que l'écoute ne reste bloquée. */
 async function speakOne(text,c){
   if(!S.speak||!HAS_TTS)return;
-  paused++;abortRec();
-  await new Promise(res=>{
-    const u=new SpeechSynthesisUtterance(text);
-    const v=pickVoice(c);if(v)u.voice=v;
-    u.lang=L(c).r;u.rate=S.rate;
-    u.onend=u.onerror=()=>res();
-    speechSynthesis.speak(u);
-  });
-  if(S.output==="phone")await new Promise(r=>setTimeout(r,450));
-  paused--;
-  if(!paused&&listening)startRec();
+  paused++;abortRec();log("voix : début");
+  try{
+    await new Promise(res=>{
+      let done=false,timer=0;
+      const finish=why=>{if(done)return;done=true;clearTimeout(timer);log("voix : "+why);res()};
+      timer=setTimeout(()=>{try{speechSynthesis.cancel()}catch(e){}finish("délai dépassé")},Math.min(25000,3000+text.length*120/S.rate));
+      try{
+        if(speechSynthesis.speaking||speechSynthesis.pending)speechSynthesis.cancel();
+        const u=new SpeechSynthesisUtterance(text);
+        const v=pickVoice(c);if(v)u.voice=v;
+        u.lang=L(c).r;u.rate=S.rate;
+        u.onend=()=>finish("fin");
+        u.onerror=e=>finish("erreur "+(e&&e.error||""));
+        speechSynthesis.speak(u);
+      }catch(e){finish("exception")}
+    });
+    await new Promise(r=>setTimeout(r,S.output==="phone"?600:350));
+  }finally{
+    paused=Math.max(0,paused-1);
+    if(!paused&&listening)startRec();
+  }
 }
 
 /* ---------- Reconnaissance vocale ---------- */
-let rec=null,listening=false,running=false,side="me",gotResult=false;
+let rec=null,listening=false,running=false,side="me",gotResult=false,startedAt=0,quickEnds=0;
 function abortRec(){
   if(!rec)return;
   const r=rec;rec=null;running=false;
@@ -322,8 +343,9 @@ function abortRec(){
 function startRec(){
   if(!SR||paused)return;
   abortRec();
-  const r=new SR();rec=r;gotResult=false;
+  const r=new SR();rec=r;gotResult=false;startedAt=Date.now();
   r.lang=L(code(side)).r;r.interimResults=true;r.continuous=false;r.maxAlternatives=1;
+  log("écoute en "+r.lang);
   r.onresult=e=>{
     let interim="",fin="";
     for(let i=e.resultIndex;i<e.results.length;i++){
@@ -333,7 +355,7 @@ function startRec(){
     $("#interim").textContent=interim||fin;
     if(fin.trim()){
       const heard=side;
-      gotResult=true;
+      gotResult=true;log("phrase reconnue");
       if(S.mode==="auto"){side=other(heard);renderControls()}
       $("#interim").textContent="";
       handleFinal(fin.trim(),heard);
@@ -344,15 +366,17 @@ function startRec(){
     if(e.error==="not-allowed"){
       listening=false;renderControls();toast("Reconnaissance vocale refusée (not-allowed). Sur iPhone : Réglages → Apps → Safari → Réglages des sites web → Microphone → Autoriser. Si Safari propose aussi la reconnaissance vocale, touchez Autoriser.");
     }else if(e.error==="service-not-allowed"){
-      listening=false;renderControls();toast("Dictée indisponible (service-not-allowed). Activez la dictée et Siri : Réglages → Général → Clavier → Activer la dictée, puis Réglages → Siri.");
+      listening=false;renderControls();toast("La reconnaissance vocale de Safari est refusée (service-not-allowed). Utilisez le champ en bas : touchez le micro du clavier pour dicter, puis « Moi » ou « Lui ».");
     }else if(e.error==="network"){toast("La reconnaissance vocale a besoin d’une connexion réseau (network).")}
     else if(e.error==="language-not-supported"){listening=false;renderControls();toast("Langue non prise en charge par la reconnaissance vocale (language-not-supported).")}
     else if(e.error!=="no-speech"&&e.error!=="aborted"){toast("Erreur de reconnaissance : "+e.error)}
   };
   r.onend=()=>{
     if(r!==rec)return;
-    running=false;$("#interim").textContent="";
+    running=false;$("#interim").textContent="";log("écoute terminée");
     if(!listening||paused)return;
+    quickEnds=(!gotResult&&Date.now()-startedAt<1200)?quickEnds+1:0;
+    if(quickEnds>=4){listening=false;renderControls();toast("L’écoute s’est arrêtée. Touchez Écouter pour la relancer.");return}
     if(S.mode==="auto"&&!gotResult){side=other(side);renderControls()}
     setTimeout(()=>{if(listening&&!paused&&!running)startRec()},200);
   };
@@ -368,7 +392,12 @@ let lastError="aucune";
 function startListening(s){
   if(!SR){toast("Ce navigateur ne propose pas la reconnaissance vocale. Utilisez Safari (iPhone) ou Chrome (Android, ordinateur).");return}
   if(s)side=s;
-  if(HAS_TTS){try{speechSynthesis.speak(new SpeechSynthesisUtterance(""))}catch(e){}}
+  /* Un appui sur Écouter repart toujours d'un état propre, même si la voix s'est bloquée. */
+  paused=0;chain=Promise.resolve();quickEnds=0;
+  if(HAS_TTS){try{
+    if(speechSynthesis.speaking||speechSynthesis.pending)speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(" ");u.volume=0;speechSynthesis.speak(u);
+  }catch(e){}}
   listening=true;renderControls();startRec();
   refreshOutput();
 }
@@ -377,9 +406,9 @@ function stopListening(){
 }
 
 /* ---------- Flux d'une phrase ---------- */
-async function handleFinal(text,hint){
+async function handleFinal(text,hint,forced){
   let from=hint;
-  if(S.mode==="auto"&&S.me!==S.them){
+  if(!forced&&S.mode==="auto"&&S.me!==S.them){
     const c=await detect(text,[S.me,S.them],code(hint));
     from=c===S.me?"me":c===S.them?"them":hint;
   }
@@ -390,7 +419,7 @@ async function handleFinal(text,hint){
   catch(e){b.fail("Traduction impossible. "+(e&&e.message?e.message:""));return}
   b.set(res.text);
   if(to==="them")showFace(res.text,dst);
-  if(S.mode==="auto"){side=to;renderControls()}
+  if(S.mode==="auto"&&!forced){side=to;renderControls()}
   await say(res.text,dst);
 }
 
@@ -432,6 +461,8 @@ function renderControls(){
   $("#mManual").setAttribute("aria-pressed",S.mode==="manual");
   const mic=$("#mic");mic.classList.toggle("on",listening);mic.textContent=listening?"Arrêter":"Écouter";
   $("#listenName").textContent=L(code(side)).n;
+  $("#tMe").textContent="Moi · "+S.me.toUpperCase()+" → "+S.them.toUpperCase();
+  $("#tThem").textContent="Lui · "+S.them.toUpperCase()+" → "+S.me.toUpperCase();
   $("#pbMe").classList.toggle("on",listening&&side==="me");
   $("#pbThem").classList.toggle("on",listening&&side==="them");
   const chMic=$("#chMic");chMic.className="chip"+(listening?" live":"");
@@ -540,6 +571,7 @@ async function fillDiag(){
     else lines.push("Micro (autorisation) : non lisible");
   }catch(e){lines.push("Micro (autorisation) : non lisible")}
   lines.push("Dernière erreur : "+lastError);
+  lines.push("Journal :\n"+(LOG.length?LOG.join("\n"):"vide"));
   $("#diag").textContent=lines.join("\n");
 }
 function openSettings(){
@@ -578,6 +610,18 @@ $("#btnClear").addEventListener("click",()=>{
   $("#dlgSet").close();
 });
 document.addEventListener("visibilitychange",()=>{if(document.hidden&&listening)stopListening();else updateEngine()});
+
+/* ---------- Saisie ou dictée du clavier (secours quand la reconnaissance vocale du navigateur est refusée) ---------- */
+function sendTyped(from){
+  const inp=$("#tIn"),text=inp.value.trim();
+  if(!text)return;
+  inp.value="";
+  if(HAS_TTS){try{speechSynthesis.speak(new SpeechSynthesisUtterance(""))}catch(e){}}
+  handleFinal(text,from,true);
+}
+$("#typed").addEventListener("submit",e=>{e.preventDefault();sendTyped("me")});
+$("#tMe").addEventListener("click",()=>sendTyped("me"));
+$("#tThem").addEventListener("click",()=>sendTyped("them"));
 
 /* ---------- Sortie: écouteurs ou haut-parleur du téléphone ---------- */
 function showFace(text,dst){
