@@ -303,7 +303,7 @@ function pickVoice(c){
   return list.find(v=>v.name===saved)||list.find(v=>v.lang===L(c).r)||list[0]||null;
 }
 const LOG=[];
-function log(m){LOG.push(new Date().toLocaleTimeString("fr-FR")+" "+m);if(LOG.length>14)LOG.shift()}
+function log(m){LOG.push(new Date().toLocaleTimeString("fr-FR")+" "+m);if(LOG.length>40)LOG.shift()}
 let paused=0,chain=Promise.resolve();
 function say(text,c){chain=chain.then(()=>speakOne(text,c)).catch(()=>{});return chain}
 /* Safari sur iPhone ne signale pas toujours la fin de la lecture : un minuteur de sécurité évite que l'écoute ne reste bloquée. */
@@ -333,13 +333,13 @@ async function speakOne(text,c){
 }
 
 /* ---------- Reconnaissance vocale ---------- */
-let R=null,listening=false,active=false,pendingStart=false,side="me",gotResult=false,startedAt=0,quickEnds=0;
+let R=null,listening=false,active=false,pendingStart=false,side="me",gotResult=false,startedAt=0,quickEnds=0,startConfirmed=false,startToken=0;
 /* Safari sur iPhone supporte mal la création d'un nouvel objet d'écoute à chaque phrase : on en garde un seul et on le relance. */
 function recognizer(){
   if(R)return R;
   const r=new SR();R=r;
   r.interimResults=true;r.continuous=false;r.maxAlternatives=1;
-  r.onstart=()=>{active=true;log("écoute active")};
+  r.onstart=()=>{active=true;startConfirmed=true;log("écoute active")};
   r.onaudiostart=()=>log("micro ouvert");
   r.onspeechstart=()=>log("parole détectée");
   r.onnomatch=()=>log("rien compris");
@@ -395,9 +395,17 @@ function startRec(){
     },900);
     return;
   }
-  gotResult=false;startedAt=Date.now();
+  gotResult=false;startedAt=Date.now();startConfirmed=false;
   r.lang=L(code(side)).r;
   log("démarrage en "+r.lang);
+  /* Après la voix, Safari peut refuser de relancer l'écoute sans toucher l'écran : on le détecte au lieu de rester muet. */
+  const tok=++startToken;
+  setTimeout(()=>{
+    if(tok===startToken&&listening&&!startConfirmed&&!paused){
+      log("l’écoute n’a pas démarré");listening=false;renderControls();
+      toast("L’écoute ne s’est pas relancée. Touchez le bouton pour reprendre.");
+    }
+  },2000);
   try{r.start()}
   catch(e){
     lastError="démarrage : "+(e&&e.name||"erreur")+(e&&e.message?" – "+e.message:"");
