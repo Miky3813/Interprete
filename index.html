@@ -109,6 +109,7 @@ dialog::backdrop{background:rgba(5,10,15,.55)}
 .setrow select{max-width:55%;border:1px solid var(--line);background:var(--bg);border-radius:10px;padding:8px}
 .setrow input[type=range]{width:45%}
 .sheet footer{padding:12px 18px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+#diag{margin:0;font:inherit;font-size:.8rem;white-space:pre-wrap;color:var(--muted);overflow-wrap:anywhere;width:100%}
 #toast{position:fixed;left:50%;bottom:calc(120px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:12px;font-size:.9rem;max-width:min(90%,420px);text-align:center;opacity:0;pointer-events:none;transition:opacity .2s;z-index:50}
 #toast.show{opacity:1}
 </style>
@@ -192,6 +193,7 @@ dialog::backdrop{background:rgba(5,10,15,.55)}
       <div class="setrow"><label for="oVoiceThem">Voix pour <span id="vlThem"></span></label><select id="oVoiceThem"></select></div>
       <div class="setrow"><label for="oOnline">Traduction en ligne de secours<small>Utilisée si le modèle de la langue n’est pas installé</small></label><input type="checkbox" id="oOnline"></div>
       <div class="setrow"><label>Conversation<small>Efface les bulles affichées</small></label><button class="btn alt" id="btnClear">Effacer</button></div>
+      <div class="setrow" style="flex-direction:column;align-items:flex-start"><label>Diagnostic<small>À me communiquer en cas de problème</small></label><pre id="diag"></pre></div>
     </div>
     <footer><button class="btn alt" data-close>Fermer</button></footer>
   </div>
@@ -338,10 +340,14 @@ function startRec(){
     }
   };
   r.onerror=e=>{
-    if(e.error==="not-allowed"||e.error==="service-not-allowed"){
-      listening=false;renderControls();toast("Accès au micro refusé. Autorisez-le dans les réglages du navigateur.");
-    }else if(e.error==="network"){toast("La reconnaissance vocale a besoin d’une connexion réseau.")}
-    else if(e.error==="language-not-supported"){listening=false;renderControls();toast("Langue non prise en charge par la reconnaissance vocale.")}
+    lastError="reconnaissance : "+e.error;
+    if(e.error==="not-allowed"){
+      listening=false;renderControls();toast("Reconnaissance vocale refusée (not-allowed). Sur iPhone : Réglages → Apps → Safari → Réglages des sites web → Microphone → Autoriser. Si Safari propose aussi la reconnaissance vocale, touchez Autoriser.");
+    }else if(e.error==="service-not-allowed"){
+      listening=false;renderControls();toast("Dictée indisponible (service-not-allowed). Activez la dictée et Siri : Réglages → Général → Clavier → Activer la dictée, puis Réglages → Siri.");
+    }else if(e.error==="network"){toast("La reconnaissance vocale a besoin d’une connexion réseau (network).")}
+    else if(e.error==="language-not-supported"){listening=false;renderControls();toast("Langue non prise en charge par la reconnaissance vocale (language-not-supported).")}
+    else if(e.error!=="no-speech"&&e.error!=="aborted"){toast("Erreur de reconnaissance : "+e.error)}
   };
   r.onend=()=>{
     if(r!==rec)return;
@@ -350,21 +356,21 @@ function startRec(){
     if(S.mode==="auto"&&!gotResult){side=other(side);renderControls()}
     setTimeout(()=>{if(listening&&!paused&&!running)startRec()},200);
   };
-  try{r.start();running=true}catch(e){}
+  try{r.start();running=true}
+  catch(e){
+    lastError="démarrage : "+(e&&e.name||"erreur")+(e&&e.message?" – "+e.message:"");
+    listening=false;renderControls();
+    toast("Impossible de démarrer l’écoute ("+(e&&e.name||"erreur")+"). Rechargez la page et retouchez Écouter.");
+  }
 }
-async function unlockMic(){
-  try{
-    const st=await navigator.mediaDevices.getUserMedia({audio:true});
-    st.getTracks().forEach(t=>t.stop());
-  }catch(e){return false}
-  refreshOutput();
-  return true;
-}
-async function startListening(s){
-  if(!SR){toast("Ce navigateur ne propose pas la reconnaissance vocale. Utilisez Chrome.");return}
-  if(!listening){const ok=await unlockMic();if(!ok){toast("Accès au micro refusé. Autorisez-le dans les réglages du navigateur.");return}}
+let lastError="aucune";
+/* Le démarrage de l'écoute doit rester synchrone dans le geste de l'utilisateur, sinon Safari refuse. */
+function startListening(s){
+  if(!SR){toast("Ce navigateur ne propose pas la reconnaissance vocale. Utilisez Safari (iPhone) ou Chrome (Android, ordinateur).");return}
   if(s)side=s;
+  if(HAS_TTS){try{speechSynthesis.speak(new SpeechSynthesisUtterance(""))}catch(e){}}
   listening=true;renderControls();startRec();
+  refreshOutput();
 }
 function stopListening(){
   listening=false;abortRec();$("#interim").textContent="";renderControls();
@@ -406,7 +412,7 @@ function addBubble(from,orig,src,dst){
 let toastT=0;
 function toast(msg){
   const t=$("#toast");t.textContent=msg;t.classList.add("show");
-  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),3800);
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),Math.max(3800,msg.length*70));
 }
 
 /* ---------- Interface: barre de langues et commandes ---------- */
@@ -522,7 +528,22 @@ function fillVoice(sel,c){
   for(const v of list){const o=document.createElement("option");o.value=v.name;o.textContent=v.name;sel.append(o)}
   const cur=pickVoice(c);if(cur)sel.value=cur.name;
 }
+async function fillDiag(){
+  const lines=[
+    "Page sécurisée (https) : "+(window.isSecureContext?"oui":"non"),
+    "Reconnaissance vocale : "+(SR?"oui":"non"),
+    "Voix de synthèse : "+(HAS_TTS?"oui":"non"),
+    "Traduction sur l’appareil : "+(HAS_TR?"oui":"non")
+  ];
+  try{
+    if(navigator.permissions){const p=await navigator.permissions.query({name:"microphone"});lines.push("Micro (autorisation) : "+p.state)}
+    else lines.push("Micro (autorisation) : non lisible");
+  }catch(e){lines.push("Micro (autorisation) : non lisible")}
+  lines.push("Dernière erreur : "+lastError);
+  $("#diag").textContent=lines.join("\n");
+}
 function openSettings(){
+  fillDiag();
   $("#oSpeak").checked=S.speak;$("#oOnline").checked=S.online;
   $("#oRate").value=S.rate;$("#oRateV").textContent="× "+Number(S.rate).toFixed(2);
   $("#vlMe").textContent=L(S.me).n;$("#vlThem").textContent=L(S.them).n;
